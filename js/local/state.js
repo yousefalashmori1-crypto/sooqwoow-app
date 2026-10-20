@@ -1,5 +1,6 @@
 // In-browser data model. All money is integer baisa. The journal is append-only: there is no code path that edits or deletes it.
 import { validateEntry, LedgerError } from "../ledger.js";
+export const DEFAULT_PAY = { "cash on delivery": "cod", cod: "cod", "الدفع عند": "cod", manual: "transfer", "bank transfer": "transfer", "تحويل": "transfer", "amwal": "gateway" };
 export const nid = (S, t) => (S.seq[t] = (S.seq[t] ?? 0) + 1);
 const ACCOUNTS = [
     ["1010", "CASH_MAIN", "الصندوق الرئيسي", "asset", "debit", null], ["1020", "BANK_MAIN", "الحساب البنكي", "asset", "debit", null],
@@ -16,7 +17,7 @@ const ACCOUNTS = [
 /** Fresh books with the chart of accounts, the two carriers and the default rates. */
 export function seed() {
     const S = {
-        v: 1, seq: {}, settings: { free_shipping_threshold_baisa: 25000, payment_map: { "cash on delivery": "cod", cod: "cod", manual: "transfer", "bank transfer": "transfer" } },
+        v: 1, seq: {}, settings: { free_shipping_threshold_baisa: 25000, payment_map: DEFAULT_PAY },
         parties: [], accounts: [], cashboxes: [], entries: [], lines: [], keyIndex: {}, carriers: [], rates: [], coverage: [], shipMap: [],
         products: [], variants: [], stock: {}, movements: [], purchases: [], pLines: [], receipts: [], counts: [], orders: [], oLines: [],
         settlements: [], sLines: [], vouchers: [], cashCounts: [], audit: [],
@@ -28,15 +29,12 @@ export function seed() {
     const party = (name, kind) => { const id = nid(S, "parties"); S.parties.push({ id, name, kinds: [kind], phone: null, notes: null, active: true }); return id; };
     const dal = party("دليلي", "carrier"), jun = party("الجنيد", "carrier");
     party("بوابة الدفع", "gateway");
-    party("معا دليلي", "supplier");
-    party("معا أمول بي", "supplier");
-    party("أبو علي", "supplier");
     const cDal = nid(S, "carriers"), cJun = nid(S, "carriers");
     S.carriers.push({ id: cDal, key: "dalili", party_id: dal, name: "دليلي", supports_office: true, return_fee: 500, settlement_days: 7, coverage_all: true, active: true }, { id: cJun, key: "junaid", party_id: jun, name: "الجنيد", supports_office: false, return_fee: 0, settlement_days: 1, coverage_all: false, active: true });
     S.rates.push({ carrier_id: cDal, delivery_type: "home", region: null, cost: 1600 }, { carrier_id: cDal, delivery_type: "office", region: null, cost: 1000 }, { carrier_id: cJun, delivery_type: "home", region: null, cost: 2000 });
     for (const r of ["muscat", "muttrah", "bawshar", "seeb", "amerat", "qurayyat"])
         S.coverage.push({ carrier_id: cJun, region: r, enabled: true });
-    S.shipMap.push({ title_match: "مكتب", carrier_id: cDal, delivery_type: "office" }, { title_match: "منزل", carrier_id: null, delivery_type: "home" });
+    S.shipMap.push({ title_match: "مكتب", carrier_id: cDal, delivery_type: "office" }, { title_match: "منزل", carrier_id: null, delivery_type: "home" }, { title_match: "شحن مجاني", carrier_id: null, delivery_type: "home" });
     return S;
 }
 export const sysId = (S, key) => {

@@ -266,6 +266,15 @@ export function cancelPurchase(S, id) {
     return { ok: true };
 }
 // ---------- orders
+const MUSCAT = ["muscat", "مسقط", "مسقط", "muttrah", "mutrah", "مطرح", "bawshar", "bousher", "bowsher", "بوشر", "seeb", "السيب", "amerat", "amrat", "العامرات", "العامرات", "qurayyat", "quriyat", "القريات",
+    "ghubra", "gubra", "الغبرة", "الغبره", "khuwair", "الخوير", "mawaleh", "الموالح", "maabela", "mabela", "المعبيلة", "المعبيله", "ansab", "الانصب", "الأنصب", "hail", "الحيل", "ruwi", "روي", "wadi kabir", "الوادي الكبير", "khoud", "الخوض", "qurum", "القرم", "azaiba", "العذيبة", "العذيبه", "athaiba", "الحيل", "ghala", "غلا", "darsait", "دارسيت", "wattayah", "الوطية", "al hail"];
+/** Shopify leaves the province empty for most Omani orders: find the region in the free-text city/address instead. */
+export function detectRegion(text) {
+    const t = String(text ?? "").toLowerCase().replace(/[ًٌٍَُِّْ]/g, "").replace(/\s+/g, " ").trim();
+    if (MUSCAT.some((k) => t.includes(k)))
+        return "muscat";
+    return t.replace(/^[-\s]+/, "").slice(0, 40);
+}
 export function orderIssues(S, p) {
     const issues = [];
     const method = classifyPayment(p.gatewayNames, S.settings.payment_map ?? {});
@@ -285,7 +294,8 @@ export function orderIssues(S, p) {
 /** Import orders (from the Shopify orders CSV). Existing order numbers are skipped, so re-importing the same file is harmless. */
 export function importOrders(S, list) {
     let added = 0, skipped = 0, review = 0, cancelled = 0, created = 0;
-    for (const p of list) {
+    for (const p0 of list) {
+        const p = { ...p0, province: detectRegion(p0.province) };
         if (S.orders.some((o) => o.order_no === p.orderNo)) {
             skipped++;
             continue;

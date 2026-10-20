@@ -1,7 +1,7 @@
 // The whole "server" running inside the browser. handle(method, path, body) answers the same /api routes as the PostgreSQL version.
 // Every mutating call runs on a snapshot: if anything throws, the books are restored exactly as they were (all-or-nothing).
 import { LedgerError, buildReversal } from "../ledger.js";
-import { seed, post, today, nid } from "./state.js";
+import { seed, DEFAULT_PAY, post, today, nid } from "./state.js";
 import * as S_ from "./services.js";
 import { parseShopifyOrdersCsv } from "./shopify-csv.js";
 const SETTING_KEYS = new Set(["payment_map", "free_shipping_threshold_baisa"]);
@@ -12,6 +12,10 @@ const nf = (m) => Object.assign(new Error(m), { status: 404 });
 export async function createBackend(storage) {
     const raw = await storage.load();
     let S = raw ? JSON.parse(raw) : seed();
+    // add the defaults that older saved books don't have yet (never overwrites what the owner changed)
+    S.settings.payment_map = { ...DEFAULT_PAY, ...(S.settings.payment_map ?? {}) };
+    if (!S.shipMap.some((m) => m.title_match === "شحن مجاني"))
+        S.shipMap.push({ title_match: "شحن مجاني", carrier_id: null, delivery_type: "home" });
     if (!raw)
         await storage.save(JSON.stringify(S));
     const acct = (id) => S.accounts.find((a) => a.id === id);
