@@ -1,0 +1,443 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8"><link rel="manifest" href="./manifest.webmanifest"><meta name="theme-color" content="#105254"><link rel="icon" href="./icon.svg"><link rel="apple-touch-icon" href="./icon-192.png"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>سوق واو · المحاسبة</title>
+<style>
+  :root { --bg:#f4f7f7; --card:#fff; --ink:#16302f; --mut:#5d7170; --acc:#105254; --acc2:#e3f0ef; --bad:#b3261e; --good:#1b7a3a; --warn:#9a6700; --line:#dde6e6 }
+  @media (prefers-color-scheme: dark) { :root { --bg:#0f1a1a; --card:#172626; --ink:#e6f0ef; --mut:#9bb2b0; --acc:#5fc3c0; --acc2:#1d3433; --bad:#ff8a80; --good:#6fd08c; --warn:#e3b341; --line:#264040 } }
+  * { box-sizing:border-box } html { -webkit-text-size-adjust:100% }
+  body { margin:0; font-family:system-ui,"Segoe UI",Tahoma,sans-serif; background:var(--bg); color:var(--ink); font-size:15px }
+  header { background:var(--acc); color:#fff; padding:10px 14px; display:flex; align-items:center; gap:10px; position:sticky; top:0; z-index:5 }
+  header b { flex:1; font-size:16px } header button { background:transparent; border:1px solid #fff8; color:#fff; padding:5px 10px; border-radius:8px; width:auto; margin:0 }
+  nav { display:flex; gap:6px; overflow-x:auto; padding:8px 10px; background:var(--card); border-bottom:1px solid var(--line); position:sticky; top:46px; z-index:4 }
+  nav a { padding:7px 12px; border-radius:18px; white-space:nowrap; color:var(--mut); cursor:pointer; text-decoration:none; font-size:14px }
+  nav a.on { background:var(--acc); color:#fff }
+  main { padding:12px; max-width:1100px; margin:auto; display:grid; gap:12px }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:12px 14px; min-width:0 }
+  h2 { margin:0 0 8px; font-size:15px; color:var(--acc) } h3 { margin:12px 0 6px; font-size:14px }
+  table { width:100%; border-collapse:collapse; font-size:13.5px } .tw { overflow-x:auto }
+  td,th { padding:6px 5px; border-bottom:1px solid var(--line); text-align:start; vertical-align:top } th { color:var(--mut); font-weight:600; white-space:nowrap }
+  td.n,th.n { text-align:end; font-variant-numeric:tabular-nums; white-space:nowrap } tr.click { cursor:pointer } tr.click:hover { background:var(--acc2) }
+  input,select,textarea,button { font:inherit; padding:9px 10px; border-radius:8px; border:1px solid var(--line); background:var(--card); color:var(--ink); width:100%; margin:3px 0 } 
+  button { background:var(--acc); color:#fff; border:0; cursor:pointer; width:auto; padding:9px 16px } button.sec { background:var(--acc2); color:var(--acc); border:1px solid var(--line) } button.dng { background:var(--bad) } button:disabled { opacity:.5; cursor:default }
+  label { display:block; font-size:12.5px; color:var(--mut); margin-top:6px } .row { display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:8px } .bar { display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin-top:8px }
+  .bad { color:var(--bad) } .good { color:var(--good) } .mut { color:var(--mut); font-size:13px } .warn { color:var(--warn) }
+  .chip { display:inline-block; padding:2px 9px; border-radius:12px; background:var(--acc2); color:var(--acc); font-size:12.5px } .chip.r { background:#fde4e1; color:var(--bad) } .chip.g { background:#dff5e5; color:var(--good) } .chip.y { background:#fff1cc; color:var(--warn) }
+  #toast { position:fixed; bottom:14px; inset-inline:14px; margin:auto; max-width:520px; padding:12px 16px; border-radius:10px; background:var(--ink); color:var(--bg); z-index:20; display:none } #toast.err { background:var(--bad); color:#fff }
+  .kv { display:grid; grid-template-columns:auto 1fr; gap:4px 12px } .kv div:nth-child(odd) { color:var(--mut) }
+</style></head>
+<body>
+<header><b>سوق واو · المحاسبة</b><span id="who" class="mut" style="color:#fff9"></span></header>
+<nav id="nav" hidden></nav>
+<main id="main"></main>
+<div id="toast"></div>
+<script type="module">
+import { readXlsx, sha256Hex, toBaisa, guessColumns } from "./xlsx-lite.js";
+import { createBackend } from "./js/local/backend.js";
+import { idbStorage } from "./storage.js";
+
+// ---------- helpers ----------
+const $ = (s, r = document) => r.querySelector(s);
+const omr = (b) => b == null || b === "" ? "" : (Number(b) < 0 ? "-" : "") + (Math.abs(Number(b)) / 1000).toFixed(3);
+const parseOmr = (s) => { const m = /^\s*(\d+)(?:[.,](\d{1,3}))?\s*$/.exec(String(s)); if (!m) throw new Error("مبلغ غير صالح: اكتب مثل 12.500"); return Number(m[1]) * 1000 + Number((m[2] ?? "").padEnd(3, "0")); };
+const today = () => new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Muscat" }).format(new Date());
+function h(tag, props, ...kids) {
+  const e = document.createElement(tag);
+  for (const [k, v] of Object.entries(props ?? {})) {
+    if (k === "class") e.className = v; else if (k.startsWith("on")) e.addEventListener(k.slice(2), v);
+    else if (k === "value") e.value = v; else if (v === true) e.setAttribute(k, ""); else if (v !== false && v != null) e.setAttribute(k, v);
+  }
+  for (const k of kids.flat(9)) if (k != null && k !== false) e.append(k.nodeType ? k : document.createTextNode(String(k)));
+  return e;
+}
+const toast = (msg, err) => { const t = $("#toast"); t.textContent = msg; t.className = err ? "err" : ""; t.style.display = "block"; clearTimeout(toast.t); toast.t = setTimeout(() => t.style.display = "none", err ? 7000 : 3000); };
+let token = "local", role = "owner";
+const ERR = { "insufficient funds": "الرصيد لا يكفي" };
+let backend = null;
+async function api(method, path, body) {
+  const r = await backend.handle(method, path, body === undefined ? undefined : JSON.parse(JSON.stringify(body)));
+  if (r.status >= 400) throw new Error(r.json.error ?? "خطأ " + r.status);
+  return r.json;
+}
+const act = (btn, fn, okMsg) => async () => { btn.disabled = true; try { const r = await fn(); toast(okMsg ?? "تم"); if (r?.warnings?.length) toast(r.warnings.join(" | "), true); return r; } catch (e) { toast(e.message, true); } finally { btn.disabled = false; } };
+const table = (cols, rows, onClick) => h("div", { class: "tw" }, h("table", {},
+  h("tr", {}, cols.map(([t, , n]) => h("th", { class: n ? "n" : "" }, t))),
+  rows.map((r) => h("tr", { class: onClick ? "click" : "", onclick: onClick ? () => onClick(r) : null },
+    cols.map(([, f, n]) => h("td", { class: n ? "n" : "" }, typeof f === "function" ? f(r) : n === "m" ? omr(r[f]) : r[f] ?? ""))))));
+const money = (f) => [f, null, "m"]; // marker, unused
+const col = (title, f, kind) => [title, kind === "m" ? ((r) => omr(typeof f === "function" ? f(r) : r[f])) : f, kind ? 1 : 0];
+const sel = (id, opts, val, ph) => { const s = h("select", { id }, ph != null && h("option", { value: "" }, ph), opts.map(([v, t]) => h("option", { value: v }, t))); if (val != null) s.value = val; return s; };
+const field = (label, input) => h("div", {}, h("label", {}, label), input);
+const STATUS = { new: ["جديد", ""], needs_review: ["يحتاج مراجعة", "r"], awaiting_payment: ["بانتظار التحويل", "y"], handed_to_carrier: ["عند شركة الشحن", ""], delivered: ["تم التسليم", "g"], returned: ["مرتجع", "y"], cancelled: ["ملغى", ""] };
+const PAY = { cod: "عند الاستلام", gateway: "بوابة دفع", transfer: "تحويل بنكي" };
+const chip = (st) => h("span", { class: "chip " + (STATUS[st]?.[1] ?? "") }, STATUS[st]?.[0] ?? st);
+const REASON = { payment_method_unknown: "بوابة الدفع غير معروفة", shipping_method_unmapped: "طريقة الشحن غير معروفة", province_missing: "المنطقة ناقصة", country_missing: "الدولة ناقصة", outside_oman: "خارج عُمان", shipping_charged_above_free_threshold: "شحن مدفوع رغم أن الطلب ≥ 25 (شحن مجاني)", free_shipping_below_threshold: "شحن مجاني رغم أن الطلب < 25" };
+const reasons = (s) => (s ?? "").split(",").filter(Boolean).map((x) => REASON[x] ?? x).join(" · ");
+
+// ---------- shell ----------
+const PAGES = [["home", "الرئيسية"], ["orders", "الطلبات"], ["vouchers", "السندات"], ["statements", "كشوف الحساب"], ["purchases", "المشتريات"], ["stock", "المخزون"], ["settle", "تسوية الشحن"], ["reports", "التقارير"], ["settings", "الإعدادات"]];
+const view = { home, orders, vouchers, statements, purchases, stock, settle, reports, settings };
+function logout() { token = null; sessionStorage.removeItem("t"); $("#nav").hidden = true; $("#out").hidden = true; $("#who").textContent = ""; showLogin(); }
+
+function nav() {
+  const n = $("#nav"); n.hidden = false; n.replaceChildren(...PAGES.map(([k, t]) => h("a", { href: "#" + k, class: location.hash.slice(1) === k ? "on" : "" }, t)));
+}
+async function route() {
+  if (!token) return;
+  const k = location.hash.slice(1) || "home"; nav();
+  const m = $("#main"); m.replaceChildren(h("div", { class: "mut" }, "جارٍ التحميل…"));
+  try { m.replaceChildren(...[].concat(await view[k]?.() ?? [])); } catch (e) { m.replaceChildren(h("div", { class: "card bad" }, e.message)); }
+}
+window.addEventListener("hashchange", route);
+function showLogin() {
+  const u = h("input", { placeholder: "اسم المستخدم", autocomplete: "username" }), p = h("input", { type: "password", placeholder: "كلمة المرور", autocomplete: "current-password" });
+  const b = h("button", {}, "دخول");
+  const go = async () => {
+    try {
+      const r = await fetch("/api/login", { method: "POST", body: JSON.stringify({ username: u.value, password: p.value }) });
+      if (!r.ok) throw new Error("بيانات الدخول غير صحيحة");
+      const j = await r.json(); token = j.token; role = j.role; sessionStorage.setItem("t", token); start();
+    } catch (e) { toast(e.message, true); }
+  };
+  b.onclick = go; p.onkeydown = (e) => e.key === "Enter" && go();
+  $("#main").replaceChildren(h("div", { class: "card" }, h("h2", {}, "تسجيل الدخول"), u, p, b));
+}
+async function start() {
+  route();
+}
+
+// ---------- shared lookups ----------
+const lk = {};
+async function lookups(force) {
+  if (force || !lk.t || Date.now() - lk.t > 20000) {
+    const [parties, accounts, cashboxes] = await Promise.all([api("GET", "/api/parties"), api("GET", "/api/accounts"), api("GET", "/api/cashboxes")]);
+    Object.assign(lk, { parties, accounts, cashboxes, t: Date.now() });
+  }
+  return lk;
+}
+const partyOpts = (kind) => lk.parties.filter((p) => !kind || p.kinds.includes(kind)).map((p) => [p.id, p.name]);
+
+// ---------- home ----------
+async function home() {
+  const d = await api("GET", "/api/dashboard");
+  return [
+    card("أرصدة الصناديق", table([col("الصندوق", "name"), col("الرصيد", "balance", "m")], d.cashboxes)),
+    card("أموال عند شركات الشحن", table([col("الشركة", "name"), col("لنا", "they_owe_us", "m"), col("علينا", "we_owe_them", "m")], d.carriers)),
+    card("المستحق للموردين", table([col("المورد", "name"), col("المبلغ", "we_owe", "m")], d.suppliers)),
+    card("آخر ثلاثة أشهر", table([col("الشهر", (r) => String(r.month).slice(0, 7)), col("الإيراد", "revenue", "m"), col("المصروف", "expenses", "m"), col("الربح", "profit", "m")], d.month)),
+    card("طلبات تحتاج إجراء", table([col("الحالة", (r) => STATUS[r.status]?.[0] ?? r.status), col("العدد", "n")], d.attention, () => (location.hash = "orders"))),
+    card("مخزون منخفض", table([col("المنتج", "title"), col("النوع", "variant"), col("الكمية", "qty")], d.lowStock)),
+  ];
+}
+const card = (t, ...c) => h("div", { class: "card" }, t && h("h2", {}, t), c);
+
+// ---------- orders ----------
+let ordFilter = "";
+async function orders() {
+  const list = await api("GET", "/api/orders" + (ordFilter ? "?status=" + ordFilter : ""));
+  const detail = h("div");
+  const q = h("input", { placeholder: "بحث برقم الطلب أو الاسم أو AWB…" });
+  q.onkeydown = async (e) => { if (e.key === "Enter") { const r = await api("GET", "/api/orders?q=" + encodeURIComponent(q.value)); body.replaceChildren(ordTable(r)); } };
+  const chips = h("div", { class: "bar" }, [["", "الكل"], ...Object.entries(STATUS).map(([k, v]) => [k, v[0]])].map(([k, t]) =>
+    h("button", { class: k === ordFilter ? "" : "sec", onclick: () => { ordFilter = k; route(); } }, t)));
+  const ordTable = (rows) => table([col("#", "order_no"), col("التاريخ", (r) => String(r.ordered_at).slice(0, 10)), col("الحالة", (r) => chip(r.status)), col("الدفع", (r) => PAY[r.payment_method] ?? ""),
+    col("المنطقة", "province"), col("المبلغ", (r) => Number(r.goods_total) + Number(r.shipping_charged), "m"), col("الشحن", "carrier"), col("ملاحظة", (r) => reasons(r.review_reason))], rows, (r) => openOrder(r.id, detail));
+  const body = h("div", {}, ordTable(list));
+  const file = h("input", { type: "file", accept: ".csv,text/csv" });
+  const imp = h("button", {}, "استيراد الطلبات من ملف Shopify");
+  imp.onclick = act(imp, async () => {
+    if (!file.files[0]) throw new Error("اختر ملف الطلبات (CSV) أولًا");
+    const r = await api("POST", "/api/orders/import", { csv: await file.files[0].text() });
+    toast(`أُضيف ${r.added} طلب جديد · تخطّي ${r.skipped} مكرر · يحتاج مراجعة ${r.review}`); route();
+  });
+  const howto = h("div", { class: "mut" }, "من Shopify: الطلبات ← تصدير ← «كل الطلبات» ← CSV لنماذج Excel ← ثم اختر الملف هنا. الطلبات المكررة تُتجاهل تلقائيًا.");
+  return [card("إضافة طلبات", howto, h("div", { class: "row" }, field("ملف الطلبات", file)), h("div", { class: "bar" }, imp)), card("الطلبات", chips, q, body), detail];
+}
+async function openOrder(id, box) {
+  const [d, , ] = await Promise.all([api("GET", `/api/orders/${id}`), lookups()]);
+  const o = d.order; const st = o.status;
+  const act1 = (label, fn, cls, ok) => { const b = h("button", { class: cls ?? "" }, label); b.onclick = act(b, async () => { const r = await fn(); await openOrder(id, box); return r; }, ok); return b; };
+  const total = Number(o.goods_total) + Number(o.shipping_charged);
+  const forms = [];
+  if (st === "needs_review") {
+    const pm = sel("pm", Object.entries(PAY), o.payment_method, "—"), dt = sel("dt", [["home", "منزل"], ["office", "مكتب دليلي"]], o.delivery_type, "—");
+    const pr = h("input", { value: o.province ?? "" }), cc = h("input", { value: o.country_code ?? "" }), sh = h("input", { value: omr(o.shipping_charged) });
+    const cf = h("input", { type: "checkbox", style: "width:auto" });
+    forms.push(h("h3", {}, "مراجعة: " + (reasons(o.review_reason) || "")), h("div", { class: "row" }, field("طريقة الدفع", pm), field("نوع التوصيل", dt), field("المنطقة", pr), field("الدولة (OM)", cc), field("الشحن المدفوع", sh)),
+      h("label", {}, cf, " أؤكد مبلغ الشحن كما هو حتى لو خالف قاعدة الشحن المجاني"),
+      h("div", { class: "bar" }, act1("اعتماد وإرسال للمعالجة", () => api("POST", `/api/orders/${id}/resolve`, { paymentMethod: pm.value || undefined, deliveryType: dt.value || undefined, province: pr.value, countryCode: cc.value, shippingCharged: parseOmr(sh.value), confirmShipping: cf.checked }))));
+  }
+  if (st === "awaiting_payment") {
+    const bx = sel("bx", lk.cashboxes.map((c) => [c.id, c.name]), null, "بدون تسجيل قبض الآن");
+    forms.push(h("h3", {}, "تأكيد التحويل البنكي"), field("سجّل القبض في", bx), h("div", { class: "bar" }, act1("تأكيد التحويل", () => api("POST", `/api/orders/${id}/confirm-transfer`, { cashboxId: bx.value || undefined, date: today() }))));
+  }
+  if (st === "new") {
+    const sg = d.suggestion;
+    const carriers = await api("GET", "/api/carriers");
+    const cr = sel("cr", carriers.map((c) => [c.id, c.name]), sg?.carrierId, "اختيار تلقائي"), awb = h("input", { placeholder: "رقم الشحنة (AWB)" }), gf = h("input", { placeholder: "رسوم البوابة 0.000" });
+    forms.push(h("h3", {}, "تسليم لشركة الشحن"), sg ? h("div", { class: "mut" }, `المقترح: ${sg.name} بتكلفة ${omr(sg.cost)}`) : h("div", { class: "bad" }, "لا توجد شركة تغطي هذه المنطقة"),
+      h("div", { class: "row" }, field("الشركة", cr), field("AWB", awb), o.payment_method === "gateway" && field("رسوم البوابة", gf)),
+      h("div", { class: "bar" }, act1("تسليم للشركة", () => api("POST", `/api/orders/${id}/handover`, { carrierId: cr.value ? Number(cr.value) : undefined, awb: awb.value || undefined, date: today(), gatewayFee: gf.value ? parseOmr(gf.value) : undefined })),
+        act1("إلغاء الطلب", () => api("POST", `/api/orders/${id}/cancel`, {}), "dng")));
+  }
+  if (st === "handed_to_carrier" || st === "delivered") {
+    const lines = d.lines.filter((l) => l.fulfillment === "stock");
+    const dmg = lines.map((l) => h("input", { type: "number", min: 0, max: l.qty, value: 0, style: "width:80px" }));
+    if (st === "handed_to_carrier") forms.push(h("div", { class: "bar" }, act1("تم التسليم للعميل", () => api("POST", `/api/orders/${id}/deliver`, { date: today() }), "", "سُجّل التسليم")));
+    forms.push(h("h3", {}, "مرتجع كامل"), lines.length && o.sale_entry_id ? h("div", {}, h("div", { class: "mut" }, "كمية التالف من كل صنف (لا تعود للمخزون):"),
+      lines.map((l, i) => h("div", { class: "bar" }, h("span", {}, `${l.title} × ${l.qty}`), dmg[i]))) : null,
+      h("div", { class: "bar" }, act1("تسجيل مرتجع", () => { if (!confirm("تسجيل الطلب كمرتجع؟")) throw new Error("أُلغي"); return api("POST", `/api/orders/${id}/return`, { date: today(), damaged: lines.map((l, i) => ({ lineId: l.id, qty: Number(dmg[i].value) })).filter((x) => x.qty > 0) }); }, "dng")));
+  }
+  box.replaceChildren(card("طلب " + o.order_no,
+    h("div", { class: "kv" }, h("div", {}, "الحالة"), h("div", {}, chip(st)), h("div", {}, "العميل"), h("div", {}, `${o.customer_name ?? ""} ${o.phone ?? ""}`), h("div", {}, "المنطقة"), h("div", {}, `${o.province ?? ""} (${o.country_code ?? ""})`),
+      h("div", {}, "الدفع"), h("div", {}, PAY[o.payment_method] ?? "—"), h("div", {}, "الإجمالي"), h("div", {}, `${omr(o.goods_total)} + شحن ${omr(o.shipping_charged)} = ${omr(total)}`),
+      o.awb && [h("div", {}, "AWB"), h("div", {}, o.awb)], o.carrier_cost != null && [h("div", {}, "تكلفة الشحن علينا"), h("div", {}, omr(o.carrier_cost))],
+      d.profit != null && [h("div", {}, "الربح"), h("div", { class: Number(d.profit) < 0 ? "bad" : "good" }, omr(d.profit))]),
+    table([col("المنتج", (r) => `${r.title ?? "⚠ غير معرّف (" + r.shopify_variant_id + ")"} ${r.variant && r.variant !== "Default" ? "· " + r.variant : ""}`), col("النوع", (r) => r.fulfillment === "dropship" ? "دروب شيبينغ" : r.fulfillment === "stock" ? "مخزون" : ""), col("الكمية", "qty"), col("السعر", "unit_price", "m"), col("التكلفة", "cost_total", "m")], d.lines),
+    ...forms));
+  box.scrollIntoView({ behavior: "smooth" });
+}
+
+// ---------- vouchers ----------
+async function vouchers() {
+  await lookups(true);
+  const kind = sel("k", [["receipt", "سند قبض"], ["payment", "سند صرف (مورد/شركة شحن)"], ["expense", "مصروف"], ["transfer", "تحويل بين الصناديق"]], "receipt");
+  const box = sel("b", lk.cashboxes.map((c) => [c.id, `${c.name} (${omr(c.balance)})`])), to = sel("t", lk.cashboxes.map((c) => [c.id, c.name]));
+  const party = sel("p", [], null), acct = sel("a", [], null);
+  const amt = h("input", { placeholder: "0.000", inputmode: "decimal" }), date = h("input", { type: "date", value: today() }), note = h("input", { placeholder: "بيان" });
+  const od = h("input", { type: "checkbox", style: "width:auto" });
+  const dyn = h("div", { class: "row" });
+  const refresh = () => {
+    const k = kind.value;
+    const AR = lk.accounts.filter((a) => ["AR_CUSTOMERS", "AR_CARRIERS", "AR_GATEWAY"].includes(a.system_key)), AP = lk.accounts.filter((a) => ["AP_SUPPLIERS", "AP_CARRIERS"].includes(a.system_key));
+    const EX = lk.accounts.filter((a) => a.type === "expense" || ["DRAWINGS", "CAPITAL"].includes(a.system_key));
+    const accts = k === "receipt" ? AR : k === "payment" ? AP : EX;
+    acct.replaceChildren(...accts.map((a) => h("option", { value: a.id, "data-kind": a.party_kind ?? "" }, a.name_ar)));
+    const fillParty = () => { const pk = acct.selectedOptions[0]?.dataset.kind; party.replaceChildren(...partyOpts(pk).map(([v, t]) => h("option", { value: v }, t))); };
+    acct.onchange = fillParty; fillParty();
+    dyn.replaceChildren(field(k === "transfer" ? "من" : "الصندوق", box), k === "transfer" ? field("إلى", to) : [field("الحساب", acct), k !== "expense" && field("الطرف", party)]);
+  };
+  kind.onchange = refresh; refresh();
+  const go = h("button", {}, "حفظ السند");
+  go.onclick = act(go, async () => {
+    const k = kind.value;
+    const r = await api("POST", "/api/vouchers", { kind: k, date: date.value, cashboxId: Number(box.value), toCashboxId: k === "transfer" ? Number(to.value) : undefined, amount: parseOmr(amt.value), accountId: k === "transfer" ? undefined : Number(acct.value), partyId: k === "receipt" || k === "payment" ? Number(party.value) : undefined, note: note.value || undefined, allowOverdraft: od.checked, idempotencyKey: `ui:${crypto.randomUUID()}` });
+    amt.value = ""; note.value = ""; route(); return r;
+  });
+  const cnt = h("input", { placeholder: "المبلغ الفعلي بالصندوق" }), cbox = sel("cb", lk.cashboxes.map((c) => [c.id, c.name]));
+  const cgo = h("button", { class: "sec" }, "جرد الصندوق"); cgo.onclick = act(cgo, async () => { const r = await api("POST", "/api/cash-counts", { cashboxId: Number(cbox.value), date: today(), counted: parseOmr(cnt.value) }); toast(r.difference === 0 ? "الجرد مطابق" : "الفرق: " + omr(r.difference)); route(); });
+  const list = await api("GET", "/api/vouchers");
+  const KN = { receipt: "قبض", payment: "صرف", expense: "مصروف", transfer: "تحويل" };
+  return [
+    card("سند جديد", h("div", { class: "row" }, field("النوع", kind), field("المبلغ (ر.ع)", amt), field("التاريخ", date), field("بيان", note)), dyn, h("label", {}, od, " السماح بتجاوز رصيد الصندوق"), h("div", { class: "bar" }, go)),
+    card("جرد صندوق", h("div", { class: "row" }, field("الصندوق", cbox), field("الفعلي", cnt)), h("div", { class: "bar" }, cgo)),
+    card("آخر السندات", table([col("#", "id"), col("التاريخ", (r) => String(r.voucher_date).slice(0, 10)), col("النوع", (r) => KN[r.kind]), col("الصندوق", "cashbox"), col("الطرف", "party"), col("الحساب", "account"), col("المبلغ", "amount", "m"), col("بيان", "note")], list)),
+  ];
+}
+
+// ---------- statements ----------
+async function statements() {
+  await lookups();
+  const who = sel("w", [...lk.parties.map((p) => [`p${p.id}`, `${p.name} (${p.kinds.join("/")})`]), ...lk.cashboxes.map((c) => [`c${c.account_id}`, `صندوق: ${c.name}`])]);
+  const out = h("div");
+  const go = h("button", {}, "عرض"); go.onclick = act(go, async () => {
+    const v = who.value; const rows = await api("GET", v[0] === "p" ? `/api/statement?partyId=${v.slice(1)}` : `/api/statement?accountId=${v.slice(1)}`);
+    out.replaceChildren(rows.length ? table([col("التاريخ", (r) => String(r.entry_date).slice(0, 10)), col("البيان", "description"), col("الحساب", "account"), col("مدين", "debit", "m"), col("دائن", "credit", "m"), col("الرصيد (مدين − دائن)", "running_net_debit", "m")], rows) : h("div", { class: "mut" }, "لا حركات"));
+  }, "تم");
+  return card("كشف حساب", h("div", { class: "row" }, field("الطرف أو الصندوق", who)), h("div", { class: "bar" }, go), h("div", { class: "mut" }, "ذمم العملاء/الشحن: الموجب = لنا. ذمم الموردين: السالب = علينا."), out);
+}
+
+// ---------- purchases ----------
+async function purchases() {
+  await lookups(); const prods = await api("GET", "/api/products");
+  const list = await api("GET", "/api/purchases"); const detail = h("div");
+  const sup = sel("s", partyOpts("supplier")), no = h("input", { placeholder: "رقم فاتورة المورد" }), date = h("input", { type: "date", value: today() });
+  const lines = h("div"); const add = () => {
+    const v = sel("v", prods.filter((p) => p.fulfillment === "stock" || true).map((p) => [p.variant_id, `${p.title}${p.variant !== "Default" ? " · " + p.variant : ""}`])), q = h("input", { type: "number", min: 1, placeholder: "الكمية" }), c = h("input", { placeholder: "سعر الوحدة 0.000" });
+    lines.append(h("div", { class: "row" }, v, q, c));
+  }; add();
+  const go = h("button", {}, "حفظ الفاتورة"); go.onclick = act(go, async () => {
+    const ls = [...lines.children].map((r) => { const [v, q, c] = r.querySelectorAll("select,input"); return { variantId: Number(v.value), qty: Number(q.value), unitCost: parseOmr(c.value) }; });
+    await api("POST", "/api/purchases", { supplierId: Number(sup.value), invoiceNo: no.value || undefined, date: date.value, lines: ls }); route();
+  });
+  return [card("فاتورة شراء جديدة", h("div", { class: "row" }, field("المورد", sup), field("رقم الفاتورة", no), field("التاريخ", date)), lines, h("div", { class: "bar" }, h("button", { class: "sec", onclick: add }, "+ بند"), go)),
+    card("الفواتير", table([col("#", "id"), col("التاريخ", (r) => String(r.invoice_date).slice(0, 10)), col("المورد", "supplier"), col("رقم", "invoice_no"), col("الإجمالي", "total", "m"), col("المستلم", "received_value", "m"), col("الحالة", (r) => ({ open: "مفتوحة", received: "مستلمة", cancelled: "ملغاة" }[r.status]))], list, (r) => openPurchase(r.id, detail))), detail];
+}
+async function openPurchase(id, box) {
+  const d = await api("GET", `/api/purchases/${id}`);
+  const qs = d.lines.map((l) => h("input", { type: "number", min: 0, max: l.qty_ordered - l.qty_received, value: l.qty_ordered - l.qty_received, style: "width:90px" }));
+  const pay = sel("pc", lk.cashboxes.map((c) => [c.id, c.name]), null, "لا أدفع الآن"); const date = h("input", { type: "date", value: today() });
+  const rcv = h("button", {}, "استلام"); rcv.onclick = act(rcv, async () => {
+    const lines = d.lines.map((l, i) => ({ lineId: l.id, qty: Number(qs[i].value) })).filter((x) => x.qty > 0);
+    const r = await api("POST", `/api/purchases/${id}/receive`, { date: date.value, lines, payCashboxId: pay.value ? Number(pay.value) : undefined }); toast("استُلمت بضاعة بـ " + omr(r.amount)); route();
+  });
+  const cancel = h("button", { class: "dng" }, "إلغاء الفاتورة"); cancel.onclick = act(cancel, async () => { await api("POST", `/api/purchases/${id}/cancel`); route(); });
+  box.replaceChildren(card(`فاتورة #${id} · ${d.invoice.supplier}`, table([col("المنتج", (r) => `${r.title} ${r.variant !== "Default" ? "· " + r.variant : ""}`), col("مطلوب", "qty_ordered"), col("مستلم", "qty_received"), col("سعر الوحدة", "unit_cost", "m"), col("استلام الآن", (r) => qs[d.lines.indexOf(r)])], d.lines),
+    d.invoice.status !== "cancelled" && h("div", {}, h("div", { class: "row" }, field("تاريخ الاستلام", date), field("الدفع للمورد", pay)), h("div", { class: "bar" }, rcv, cancel))));
+}
+
+// ---------- stock ----------
+async function stock() {
+  await lookups(); const prods = await api("GET", "/api/products"); const box = h("div");
+  const info = h("div", { class: "mut" }, `${prods.length} صنف · قيمة المخزون ${omr(prods.reduce((s, p) => s + Number(p.value), 0))}`);
+  const sync = null;
+  const t = table([col("المنتج", (r) => `${r.title}${r.variant !== "Default" ? " · " + r.variant : ""}`), col("النوع", (r) => r.fulfillment === "dropship" ? "دروب شيبينغ" : "مخزون"), col("الكمية", "qty"), col("التكلفة (متوسط)", (r) => Number(r.qty) > 0 ? omr(Math.round(Number(r.value) / Number(r.qty))) : omr(r.default_cost)), col("القيمة", "value", "m"), col("حد الطلب", "reorder_level")], prods, (r) => editVariant(r, box));
+  const cnt = h("div"); const countRows = prods.filter((p) => p.fulfillment === "stock");
+  const sk = h("input", { placeholder: "فلتر…" }); const cdate = h("input", { type: "date", value: today() }); const inputs = new Map();
+  const ctab = h("div", { class: "tw" });
+  const draw = () => { ctab.replaceChildren(h("table", {}, h("tr", {}, ["المنتج", "الدفتري", "الفعلي", "السبب"].map((x) => h("th", {}, x))),
+    countRows.filter((p) => !sk.value || (p.title + p.variant).includes(sk.value)).map((p) => { if (!inputs.has(p.variant_id)) inputs.set(p.variant_id, [h("input", { type: "number", min: 0, style: "width:90px" }), sel("r", [["count_difference", "فرق جرد"], ["damaged", "تالف"], ["lost", "مفقود"]])]);
+      const [q, r] = inputs.get(p.variant_id); return h("tr", {}, h("td", {}, `${p.title} ${p.variant !== "Default" ? "· " + p.variant : ""}`), h("td", {}, p.qty), h("td", {}, q), h("td", {}, r)); }))); };
+  sk.oninput = draw; draw();
+  const cgo = h("button", {}, "اعتماد الجرد"); cgo.onclick = act(cgo, async () => {
+    const ls = [...inputs].filter(([, [q]]) => q.value !== "").map(([id, [q, r]]) => ({ variantId: Number(id), countedQty: Number(q.value), reason: r.value }));
+    if (!ls.length) throw new Error("أدخل كمية واحدة على الأقل"); const r = await api("POST", "/api/stock/counts", { date: cdate.value, lines: ls }); toast(`عُدّل ${r.adjusted} صنف`); route();
+  });
+  const ogo = h("button", { class: "sec" }, "رصيد افتتاحي من الأرقام المدخلة (الكمية × التكلفة)");
+  const ocost = new Map();
+  ogo.onclick = act(ogo, async () => {
+    const ls = [...inputs].filter(([, [q]]) => q.value !== "").map(([id, [q]]) => { const c = prompt(`تكلفة الوحدة للصنف ${id} (ر.ع)`); return { variantId: Number(id), qty: Number(q.value), unitCost: parseOmr(c) }; }).filter((x) => x.qty > 0);
+    if (!ls.length) throw new Error("لا أصناف"); await api("POST", "/api/stock/opening", { date: cdate.value, lines: ls }); route();
+  });
+  return [card("المخزون", info, h("div", { class: "bar" }, sync), t), box,
+    card("جرد المخزون / رصيد افتتاحي", h("div", { class: "mut" }, "اكتب الكمية الفعلية فقط للأصناف التي عددتها. الجرد يسجّل الفرق بالتكلفة المتوسطة، والرصيد الافتتاحي يدخل المخزون مقابل رأس المال."), h("div", { class: "row" }, field("التاريخ", cdate), field("فلتر", sk)), ctab, h("div", { class: "bar" }, cgo, ogo))];
+}
+function editVariant(r, box) {
+  const ful = sel("f", [["stock", "مخزون"], ["dropship", "دروب شيبينغ"]], r.fulfillment), cost = h("input", { value: r.default_cost == null ? "" : omr(r.default_cost) }), rl = h("input", { type: "number", value: r.reorder_level });
+  const sup = sel("s", partyOpts("supplier"), r.supplier_id, "—");
+  const go = h("button", {}, "حفظ"); go.onclick = act(go, async () => { await api("PUT", `/api/variants/${r.variant_id}`, { fulfillment: ful.value, defaultCost: cost.value ? parseOmr(cost.value) : null, supplierId: sup.value ? Number(sup.value) : null, reorderLevel: Number(rl.value), productFulfillment: ful.value, productSupplierId: sup.value ? Number(sup.value) : undefined }); route(); });
+  box.replaceChildren(card(`تعديل: ${r.title}`, h("div", { class: "row" }, field("طريقة التنفيذ", ful), field("تكلفة افتراضية (دروب شيبينغ)", cost), field("المورد", sup), field("حد إعادة الطلب", rl)), h("div", { class: "bar" }, go)));
+}
+
+// ---------- carrier settlement ----------
+async function settle() {
+  await lookups(); const carriers = await api("GET", "/api/carriers"); const hist = await api("GET", "/api/settlements");
+  const cr = sel("c", carriers.map((c) => [c.id, c.name])), file = h("input", { type: "file", accept: ".xlsx" });
+  const recv = h("input", { placeholder: "المبلغ المحوّل فعلًا 0.000" }), date = h("input", { type: "date", value: today() }), bank = sel("b", lk.cashboxes.map((c) => [c.id, c.name]), lk.cashboxes.find((c) => c.kind === "bank")?.id);
+  const out = h("div"); let state = null;
+  const FIELDS = [["note", "الملاحظة (رقم الطلب)"], ["barcode", "الباركود"], ["status", "الحالة"], ["cod", "مبلغ التحصيل COD"], ["shippingPrice", "سعر الشحن"], ["wilaya", "الولاية"]];
+  file.onchange = async () => {
+    try {
+      const buf = await file.files[0].arrayBuffer(); const wb = await readXlsx(buf); const sh = wb.sheets[0];
+      const hdr = sh.rows[0]; const g = guessColumns(hdr);
+      state = { hash: await sha256Hex(buf), name: file.files[0].name, rows: sh.rows.slice(1).filter((r) => r.some((x) => String(x).trim())), map: g };
+      const sels = FIELDS.map(([f, t]) => field(t, sel("m_" + f, hdr.map((x, i) => [i, `${i + 1}: ${x}`]), g[f], "—")));
+      sels.forEach((s) => s.querySelector("select").onchange = (e) => { state.map[e.target.id.slice(2)] = e.target.value === "" ? undefined : Number(e.target.value); });
+      out.replaceChildren(h("h3", {}, `${state.rows.length} صفًا — تأكد من الأعمدة`), h("div", { class: "row" }, sels), h("div", { class: "bar" }, check));
+    } catch (e) { toast(e.message, true); }
+  };
+  const build = () => {
+    const m = state.map; for (const [f] of FIELDS) if (m[f] == null) throw new Error("حدد عمود: " + FIELDS.find((x) => x[0] === f)[1]);
+    return state.rows.map((r) => ({ note: String(r[m.note] ?? ""), barcode: String(r[m.barcode] ?? ""), status: String(r[m.status] ?? ""), cod: toBaisa(r[m.cod]) ?? 0, shippingPrice: toBaisa(r[m.shippingPrice]) ?? 0, wilaya: String(r[m.wilaya] ?? "") }));
+  };
+  const check = h("button", {}, "فحص ومطابقة"); let rows = null;
+  const result = h("div");
+  check.onclick = act(check, async () => {
+    rows = build(); const r = await api("POST", "/api/settlements/check", { carrierId: Number(cr.value), rows, received: recv.value ? parseOmr(recv.value) : 0 });
+    const diff = r.difference;
+    result.replaceChildren(card("نتيجة المطابقة", h("div", { class: "kv" }, h("div", {}, "صافي COD"), h("div", {}, omr(r.codNet)), h("div", {}, "شحن طلبات مدفوعة مسبقًا"), h("div", {}, omr(r.prepaidShipping)), h("div", {}, "رسوم رجوع"), h("div", {}, omr(r.returnFees)),
+      h("div", {}, "المتوقع تحويله"), h("div", {}, h("b", {}, omr(r.expectedNet))), h("div", {}, "المحوَّل فعلًا"), h("div", {}, omr(r.received)), h("div", {}, "الفرق"), h("div", { class: diff === 0 ? "good" : "bad" }, omr(diff))),
+      r.differences.length > 0 && [h("h3", {}, "فروق بالمبالغ"), table([col("طلب", "orderNo"), col("السبب", "reason")], r.differences)],
+      r.unknownOrders.length > 0 && [h("h3", { class: "warn" }, "طلبات غير موجودة عندنا"), table([col("ملاحظة", (x) => x.note), col("باركود", "barcode"), col("COD", "cod", "m")], r.unknownOrders)],
+      r.missingFromStatement.length > 0 && [h("h3", { class: "warn" }, "عندنا عند الشركة ولم تظهر بالكشف"), table([col("طلب", "orderNo"), col("المتوقع", "expectedCod", "m")], r.missingFromStatement)],
+      h("div", { class: "mut" }, "الفرق غير المحسوم يبقى مفتوحًا على ذمة الشركة ولا يُشطب."),
+      h("div", { class: "bar" }, commit)));
+  }, "تمت المطابقة");
+  const commit = h("button", {}, "اعتماد التسوية وقيدها");
+  commit.onclick = act(commit, async () => {
+    if (!confirm("قيد التسوية وتحديث حالات الطلبات؟ لا يمكن حذفه (فقط عكسه).")) throw new Error("أُلغي");
+    const r = await api("POST", "/api/settlements/commit", { carrierId: Number(cr.value), rows, received: parseOmr(recv.value), transferDate: date.value, cashboxId: Number(bank.value), fileHash: state.hash, fileName: state.name });
+    toast(`سُجّلت. متبقٍ على الشركة: ${omr(r.openDifference)} · طلبات تحدّثت: ${r.touched.length}`); route();
+  });
+  return [card("رفع كشف شركة الشحن (Excel)", h("div", { class: "row" }, field("الشركة", cr), field("ملف الكشف .xlsx", file), field("المبلغ المحوّل", recv), field("تاريخ التحويل", date), field("المستلَم في", bank)), out), result,
+    card("التسويات السابقة", table([col("#", "id"), col("الشركة", "carrier"), col("التاريخ", (r) => String(r.transfer_date).slice(0, 10)), col("المحوَّل", "received", "m"), col("المتوقع", "expected", "m"), col("الفرق", "difference", "m"), col("الملف", "file_name")], hist))];
+}
+
+// ---------- reports ----------
+const REP = [["daily_sales", "المبيعات اليومية", [["day", "اليوم", "d"], ["net_sales", "صافي المبيعات", "m"], ["shipping_revenue", "إيراد الشحن", "m"], ["cogs", "تكلفة المبيعات", "m"]]],
+  ["monthly_pnl", "الأرباح والخسائر الشهرية", [["month", "الشهر", "d"], ["revenue", "الإيراد", "m"], ["expenses", "المصروف", "m"], ["profit", "الربح", "m"]]],
+  ["order_profit", "ربح كل طلب", [["order_no", "طلب"], ["status", "الحالة", "s"], ["profit", "الربح", "m"]]],
+  ["carrier_pending", "أموال شركات الشحن", [["name", "الشركة"], ["they_owe_us", "لنا", "m"], ["we_owe_them", "علينا", "m"]]],
+  ["carrier_aging", "أعمار مستحقات الشحن", [["name", "الشركة"], ["d0_2", "0–2 يوم", "m"], ["d3_7", "3–7", "m"], ["d8_plus", "+8", "m"]]],
+  ["supplier_balances", "مستحقات الموردين", [["name", "المورد"], ["we_owe", "علينا", "m"]]],
+  ["customer_balances", "ذمم العملاء", [["name", "العميل"], ["owes_us", "لنا", "m"]]],
+  ["stock_value", "قيمة المخزون", [["title", "المنتج"], ["variant", "النوع"], ["qty", "الكمية"], ["value", "القيمة", "m"], ["avg_cost", "متوسط التكلفة", "m"]]],
+  ["dropship_to_forward", "دروب شيبينغ لإرساله للمورد", [["supplier", "المورد"], ["order_no", "طلب"], ["title", "المنتج"], ["qty", "الكمية"]]],
+  ["trial_balance", "ميزان المراجعة", [["code", "الرمز"], ["name_ar", "الحساب"], ["total_debit", "مدين", "m"], ["total_credit", "دائن", "m"]]],
+  ["purchases_daily", "المشتريات اليومية", [["day", "اليوم", "d"], ["purchased", "المشتريات", "m"]]]];
+async function reports() {
+  const pick = sel("r", REP.map(([k, t]) => [k, t])), out = h("div");
+  const show = async () => { const [k, , cols] = REP.find((r) => r[0] === pick.value); const rows = await api("GET", "/api/reports/" + k);
+    out.replaceChildren(rows.length ? table(cols.map(([f, t, kind]) => kind === "m" ? col(t, f, "m") : col(t, (r) => kind === "d" ? String(r[f]).slice(0, 10) : kind === "s" ? STATUS[r[f]]?.[0] ?? r[f] : r[f] ?? "")), rows) : h("div", { class: "mut" }, "لا بيانات")); };
+  pick.onchange = () => show().catch((e) => toast(e.message, true)); await show();
+  const jr = h("div"); const jb = h("button", { class: "sec" }, "عرض دفتر اليومية"); jb.onclick = act(jb, async () => {
+    const rows = await api("GET", "/api/journal?limit=60");
+    jr.replaceChildren(...rows.map((e) => h("div", { class: "card", style: "margin-top:8px" }, h("b", {}, `#${e.id} · ${String(e.entry_date).slice(0, 10)} · ${e.description}`), e.reversed && h("span", { class: "chip y" }, "معكوس"), e.reverses_entry_id && h("span", { class: "chip" }, "عكس #" + e.reverses_entry_id),
+      table([col("الحساب", "account"), col("الطرف", "party"), col("مدين", "debit", "m"), col("دائن", "credit", "m")], e.lines),
+      role === "owner" && !e.reversed && !e.reverses_entry_id && h("button", { class: "dng", onclick: async () => { if (!confirm(`عكس القيد #${e.id}؟`)) return; try { await api("POST", `/api/journal/${e.id}/reverse`, { date: today() }); toast("عُكس القيد"); jb.click(); } catch (er) { toast(er.message, true); } } }, "عكس القيد"))));
+  }, "تم");
+  return [card("التقارير", field("التقرير", pick), out), card("دفتر اليومية", h("div", { class: "mut" }, "لا تعديل ولا حذف: التصحيح بقيد عكسي فقط."), h("div", { class: "bar" }, jb), jr)];
+}
+
+// ---------- settings ----------
+async function settings() {
+  await lookups(true);
+  const out = [];
+  const carriers = await api("GET", "/api/carriers");
+  for (const c of carriers) {
+    const rf = h("input", { value: omr(c.return_fee) }), sd = h("input", { type: "number", value: c.settlement_days });
+    const rates = h("textarea", { rows: 4, placeholder: "home|| 1.600\noffice|| 1.000\nhome|nizwa|3.000" }); rates.value = c.rates.map((r) => `${r.delivery_type}|${r.region ?? ""}|${omr(r.cost)}`).join("\n");
+    const cov = h("textarea", { rows: 2 }); cov.value = c.coverage.join(", "); const all = h("input", { type: "checkbox", style: "width:auto" }); all.checked = c.coverage_all;
+    const go = h("button", {}, "حفظ"); go.onclick = act(go, () => api("PUT", `/api/carriers/${c.id}`, { returnFee: parseOmr(rf.value), settlementDays: Number(sd.value), coverageAll: all.checked,
+      rates: rates.value.split("\n").filter((x) => x.trim()).map((l) => { const [t, r, k] = l.split("|").map((x) => x.trim()); return { deliveryType: t, region: r || null, cost: parseOmr(k) }; }),
+      coverage: cov.value.split(/[,\n]/).map((x) => x.trim()).filter(Boolean) }));
+    out.push(card(`شركة الشحن: ${c.name}`, h("div", { class: "row" }, field("رسم الرجوع", rf), field("أيام التسوية", sd)), h("label", {}, all, " تغطي كل المناطق"), field("المناطق المغطاة (إن لم تكن تغطي الكل)", cov),
+      field("أسعار التكلفة علينا — سطر لكل سعر: النوع|المنطقة|السعر (المنطقة فارغة = الافتراضي)", rates), h("div", { class: "bar" }, go)));
+  }
+  const s = await api("GET", "/api/settings");
+  const pm = h("textarea", { rows: 5 }); pm.value = Object.entries(s.settings.payment_map ?? {}).map(([k, v]) => `${k} = ${v}`).join("\n");
+  const th = h("input", { value: omr(s.settings.free_shipping_threshold_baisa ?? 25000) });
+  const sm = h("textarea", { rows: 3 }); sm.value = s.shippingMap.map((r) => `${r.title_match} | ${r.delivery_type} | ${r.carrier ?? ""}`).join("\n");
+  const g1 = h("button", {}, "حفظ"); g1.onclick = act(g1, async () => {
+    const map = {}; for (const l of pm.value.split("\n").filter((x) => x.trim())) { const [k, v] = l.split("=").map((x) => x.trim()); if (!["cod", "gateway", "transfer"].includes(v)) throw new Error(`طريقة دفع غير صالحة في: ${l}`); map[k.toLowerCase()] = v; }
+    await api("PUT", "/api/settings/payment_map", { value: map }); await api("PUT", "/api/settings/free_shipping_threshold_baisa", { value: parseOmr(th.value) });
+    await api("PUT", "/api/shipping-map", { rows: sm.value.split("\n").filter((x) => x.trim()).map((l) => { const [t, d, c] = l.split("|").map((x) => x.trim()); return { titleMatch: t, deliveryType: d, carrier: c || null }; }) });
+  });
+  out.push(card("ربط Shopify", field("بوابات الدفع: اسم البوابة (جزء منه) = cod أو gateway أو transfer — أضف اسم بوابتك الإلكترونية هنا", pm), field("حد الشحن المجاني (ر.ع)", th), field("طرق الشحن: جزء من اسم الطريقة | home أو office | مفتاح الشركة (اختياري)", sm), h("div", { class: "bar" }, g1)));
+  // parties
+  const nm = h("input", { placeholder: "الاسم" }), kd = sel("k", [["supplier", "مورد"], ["customer", "عميل"], ["carrier", "شركة شحن"], ["gateway", "بوابة دفع"]]), ph = h("input", { placeholder: "هاتف" });
+  const pg = h("button", {}, "إضافة"); pg.onclick = act(pg, async () => { await api("POST", "/api/parties", { name: nm.value, kind: kd.value, phone: ph.value || undefined }); route(); });
+  out.push(card("الأطراف", table([col("الاسم", "name"), col("النوع", (r) => r.kinds.join(" / ")), col("هاتف", "phone")], lk.parties), h("div", { class: "row" }, field("الاسم", nm), field("النوع", kd), field("هاتف", ph)), h("div", { class: "bar" }, pg)));
+  const bn = h("input", { placeholder: "اسم الصندوق/الحساب" }), bk = sel("bk", [["cash", "نقدي"], ["bank", "بنكي"]]); const bg = h("button", {}, "إضافة صندوق");
+  bg.onclick = act(bg, async () => { await api("POST", "/api/cashboxes", { name: bn.value, kind: bk.value }); route(); });
+  out.push(card("الصناديق", table([col("الاسم", "name"), col("النوع", (r) => r.kind === "bank" ? "بنك" : "نقد"), col("الرصيد", "balance", "m")], lk.cashboxes), h("div", { class: "row" }, field("الاسم", bn), field("النوع", bk)), h("div", { class: "bar" }, bg)));
+  if (false) {
+    const users = await api("GET", "/api/users");
+    const un = h("input", { placeholder: "اسم المستخدم" }), fn = h("input", { placeholder: "الاسم الكامل" }), rl = sel("r", [["staff", "موظف"], ["accountant", "محاسب"], ["viewer", "عرض فقط"], ["owner", "مالك"]]), pw = h("input", { type: "password", placeholder: "كلمة مرور 10+ أحرف" });
+    const ug = h("button", {}, "إضافة مستخدم"); ug.onclick = act(ug, async () => { await api("POST", "/api/users", { username: un.value, fullName: fn.value, role: rl.value, password: pw.value }); route(); });
+    out.push(card("المستخدمون", table([col("المستخدم", "username"), col("الاسم", "full_name"), col("الدور", "role"), col("فعّال", (r) => r.active ? "نعم" : "لا")], users), h("div", { class: "row" }, field("المستخدم", un), field("الاسم", fn), field("الدور", rl), field("كلمة المرور", pw)), h("div", { class: "bar" }, ug)));
+  }
+  const bf = h("input", { type: "file", accept: ".json,application/json" });
+  const ex = h("button", {}, "تنزيل نسخة احتياطية"); ex.onclick = act(ex, async () => {
+    const r = await api("GET", "/api/backup/export"); const a = h("a", { href: URL.createObjectURL(new Blob([r.data], { type: "application/json" })), download: `sooqwoow-backup-${today()}.json` }); document.body.append(a); a.click(); a.remove();
+  }, "نُزّلت النسخة");
+  const im = h("button", { class: "sec" }, "استرجاع نسخة"); im.onclick = act(im, async () => {
+    if (!bf.files[0]) throw new Error("اختر ملف النسخة أولًا"); if (!confirm("سيُستبدل كل ما في التطبيق الآن بمحتوى الملف. متأكد؟")) throw new Error("أُلغي");
+    const r = await api("POST", "/api/backup/restore", { data: await bf.files[0].text() }); toast(`استُرجع ${r.entries} قيد`); route();
+  });
+  out.push(card("النسخ الاحتياطي", h("div", { class: "mut" }, "بياناتك محفوظة داخل هذا الجهاز فقط. نزّل نسخة أسبوعيًا واحفظها في مكان آمن (مثلاً Google Drive)، ولنقل البيانات بين الجوال والكمبيوتر."), h("div", { class: "bar" }, ex), field("ملف نسخة سابقة", bf), h("div", { class: "bar" }, im)));
+  return out;
+}
+
+// ---------- boot ----------
+(async () => {
+  try {
+    backend = await createBackend(idbStorage());
+    if (navigator.storage?.persist) navigator.storage.persist().catch(() => {});
+    route();
+  } catch (e) { $("#main").replaceChildren(h("div", { class: "card bad" }, "تعذّر فتح التخزين: " + e.message)); }
+})();
+if ("serviceWorker" in navigator) navigator.serviceWorker.register("./sw.js").catch(() => {});
+</script>
+</body></html>
