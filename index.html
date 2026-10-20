@@ -253,20 +253,49 @@ async function statements() {
   return card("كشف حساب", h("div", { class: "row" }, field("الطرف أو الصندوق", who)), h("div", { class: "bar" }, go), h("div", { class: "mut" }, "ذمم العملاء/الشحن: الموجب = لنا. ذمم الموردين: السالب = علينا."), out);
 }
 
+// ---------- product picker (search by name / SKU / barcode, with pictures) ----------
+const pic = (u, n = 38) => u ? h("img", { src: u, loading: "lazy", style: `width:${n}px;height:${n}px;object-fit:cover;border-radius:6px;flex:none;background:var(--acc2)` }) : h("div", { style: `width:${n}px;height:${n}px;border-radius:6px;flex:none;background:var(--acc2)` });
+const pname = (p) => `${p.title}${p.variant !== "Default" ? " · " + p.variant : ""}`;
+function productPicker(prods) {
+  const inp = h("input", { placeholder: "ابحث بالاسم أو الباركود أو SKU…", autocomplete: "off" }), box = h("div", { style: "position:relative" });
+  const sel1 = h("div", { class: "mut", style: "display:flex;align-items:center;gap:8px;margin:4px 0" });
+  const list = h("div", { style: "display:none;position:absolute;inset-inline:0;top:100%;z-index:6;background:var(--card);border:1px solid var(--line);border-radius:10px;max-height:300px;overflow:auto;box-shadow:0 6px 20px #0003" });
+  box.value = null;
+  const choose = (p) => { box.value = p.variant_id; sel1.replaceChildren(pic(p.image, 46), h("b", {}, pname(p))); inp.value = ""; list.style.display = "none"; };
+  const show = () => {
+    const q = inp.value.trim().toLowerCase(); if (!q) { list.style.display = "none"; return; }
+    const hit = prods.filter((p) => [p.title, p.variant, p.sku, p.barcode].some((x) => String(x ?? "").toLowerCase().includes(q)));
+    if (hit.length === 1 && String(hit[0].barcode ?? "") === inp.value.trim()) return choose(hit[0]);
+    list.replaceChildren(...(hit.slice(0, 8).map((p) => h("div", { style: "display:flex;align-items:center;gap:8px;padding:6px 8px;cursor:pointer;border-bottom:1px solid var(--line)", onclick: () => choose(p) },
+      pic(p.image), h("div", { style: "min-width:0" }, h("div", {}, pname(p)), h("div", { class: "mut" }, [p.sku, p.barcode].filter(Boolean).join(" · ") + `  ·  الكمية ${p.qty}`)))).concat(hit.length ? [] : [h("div", { class: "mut", style: "padding:10px" }, "لا نتائج. اجلب المنتجات من Shopify أولًا")])));
+    list.style.display = "block";
+  };
+  inp.oninput = show; inp.onkeydown = (e) => { if (e.key === "Enter") { e.preventDefault(); const f = list.firstChild; f?.click?.(); } };
+  box.append(sel1, inp, list); return box;
+}
+async function pullProducts() {
+  let url = "", key = ""; try { url = localStorage.getItem("relayUrl") ?? ""; key = localStorage.getItem("relayKey") ?? ""; } catch {}
+  if (!url || !key) throw new Error("اربط Shopify أولًا من شاشة الطلبات (رابط الوسيط والمفتاح)");
+  const r = await fetch(url.replace(/\/$/, "") + "/?products=1", { headers: { authorization: "Bearer " + key } });
+  const j = await r.json().catch(() => ({})); if (!r.ok || j.error) throw new Error(j.error ?? "فشل الاتصال بالوسيط (" + r.status + ")");
+  return api("POST", "/api/products/import", { products: j.products });
+}
+
 // ---------- purchases ----------
 async function purchases() {
   await lookups(); const prods = await api("GET", "/api/products");
   const list = await api("GET", "/api/purchases"); const detail = h("div");
   const sup = sel("s", partyOpts("supplier")), no = h("input", { placeholder: "رقم فاتورة المورد" }), date = h("input", { type: "date", value: today() });
   const lines = h("div"); const add = () => {
-    const v = sel("v", prods.filter((p) => p.fulfillment === "stock" || true).map((p) => [p.variant_id, `${p.title}${p.variant !== "Default" ? " · " + p.variant : ""}`])), q = h("input", { type: "number", min: 1, placeholder: "الكمية" }), c = h("input", { placeholder: "سعر الوحدة 0.000" });
-    lines.append(h("div", { class: "row" }, v, q, c));
+    const v = productPicker(prods), q = h("input", { type: "number", min: 1, placeholder: "الكمية" }), c = h("input", { placeholder: "سعر الوحدة 0.000" });
+    lines.append(h("div", { style: "border:1px solid var(--line);border-radius:10px;padding:8px;margin:6px 0" }, v, h("div", { class: "row" }, q, c)));
   }; add();
+  const pp = h("button", { class: "sec" }, "جلب المنتجات والصور من Shopify"); pp.onclick = act(pp, async () => { const r = await pullProducts(); toast(`${r.products} منتج جديد · ${r.variants} نوع جديد`); route(); });
   const go = h("button", {}, "حفظ الفاتورة"); go.onclick = act(go, async () => {
-    const ls = [...lines.children].map((r) => { const [v, q, c] = r.querySelectorAll("select,input"); return { variantId: Number(v.value), qty: Number(q.value), unitCost: parseOmr(c.value) }; });
+    const ls = [...lines.children].map((r) => { const q = r.querySelectorAll("input[type=number]")[0], c = r.querySelectorAll("input:not([type=number])")[1]; const vid = r.firstChild.value; if (!vid) throw new Error("اختر المنتج في كل بند"); return { variantId: Number(vid), qty: Number(q.value), unitCost: parseOmr(c.value) }; });
     await api("POST", "/api/purchases", { supplierId: Number(sup.value), invoiceNo: no.value || undefined, date: date.value, lines: ls }); route();
   });
-  return [card("فاتورة شراء جديدة", h("div", { class: "row" }, field("المورد", sup), field("رقم الفاتورة", no), field("التاريخ", date)), lines, h("div", { class: "bar" }, h("button", { class: "sec", onclick: add }, "+ بند"), go)),
+  return [card("فاتورة شراء جديدة", h("div", { class: "row" }, field("المورد", sup), field("رقم الفاتورة", no), field("التاريخ", date)), lines, h("div", { class: "bar" }, h("button", { class: "sec", onclick: add }, "+ بند"), go, pp)),
     card("الفواتير", table([col("#", "id"), col("التاريخ", (r) => String(r.invoice_date).slice(0, 10)), col("المورد", "supplier"), col("رقم", "invoice_no"), col("الإجمالي", "total", "m"), col("المستلم", "received_value", "m"), col("الحالة", (r) => ({ open: "مفتوحة", received: "مستلمة", cancelled: "ملغاة" }[r.status]))], list, (r) => openPurchase(r.id, detail))), detail];
 }
 async function openPurchase(id, box) {
@@ -286,8 +315,8 @@ async function openPurchase(id, box) {
 async function stock() {
   await lookups(); const prods = await api("GET", "/api/products"); const box = h("div");
   const info = h("div", { class: "mut" }, `${prods.length} صنف · قيمة المخزون ${omr(prods.reduce((s, p) => s + Number(p.value), 0))}`);
-  const sync = null;
-  const t = table([col("المنتج", (r) => `${r.title}${r.variant !== "Default" ? " · " + r.variant : ""}`), col("النوع", (r) => r.fulfillment === "dropship" ? "دروب شيبينغ" : "مخزون"), col("الكمية", "qty"), col("التكلفة (متوسط)", (r) => Number(r.qty) > 0 ? omr(Math.round(Number(r.value) / Number(r.qty))) : omr(r.default_cost)), col("القيمة", "value", "m"), col("حد الطلب", "reorder_level")], prods, (r) => editVariant(r, box));
+  const sync = h("button", { class: "sec" }, "جلب المنتجات والصور من Shopify"); sync.onclick = act(sync, async () => { const r = await pullProducts(); toast(`${r.products} منتج جديد · ${r.variants} نوع جديد`); route(); });
+  const t = table([col("", (r) => pic(r.image, 34)), col("المنتج", (r) => `${r.title}${r.variant !== "Default" ? " · " + r.variant : ""}`), col("النوع", (r) => r.fulfillment === "dropship" ? "دروب شيبينغ" : "مخزون"), col("الكمية", "qty"), col("التكلفة (متوسط)", (r) => Number(r.qty) > 0 ? omr(Math.round(Number(r.value) / Number(r.qty))) : omr(r.default_cost)), col("القيمة", "value", "m"), col("حد الطلب", "reorder_level")], prods, (r) => editVariant(r, box));
   const cnt = h("div"); const countRows = prods.filter((p) => p.fulfillment === "stock");
   const sk = h("input", { placeholder: "فلتر…" }); const cdate = h("input", { type: "date", value: today() }); const inputs = new Map();
   const ctab = h("div", { class: "tw" });
