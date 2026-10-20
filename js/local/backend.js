@@ -234,6 +234,8 @@ export async function createBackend(storage) {
             return act === "resolve" ? S_.resolveOrder(S, id, b) : act === "confirm-transfer" ? S_.confirmTransfer(S, id, b) : act === "handover" ? S_.handoverOrder(S, id, b)
                 : act === "deliver" ? S_.deliverOrder(S, id, b) : act === "return" ? S_.returnOrder(S, id, b) : S_.cancelOrder(S, id, b);
         }
+        if (is("POST", /^\/api\/products\/import$/))
+            return S_.importProducts(S, b.products);
         if (is("PUT", /^\/api\/variants\/(\d+)$/))
             return S_.updateVariant(S, badId(mt[1]), b);
         if (is("POST", /^\/api\/stock\/opening$/))

@@ -113,6 +113,39 @@ function ensureVariant(S, sku, title, variantTitle) {
     S.variants.push(v);
     return v;
 }
+/** Upsert the Shopify catalogue (names, SKUs, barcodes, pictures). Never touches costs, stock or supplier settings. */
+export function importProducts(S, list) {
+    let products = 0, variants = 0;
+    for (const sp of list ?? []) {
+        const title = String(sp.title ?? "").trim();
+        if (!title)
+            continue;
+        let p = S.products.find((x) => x.title === title);
+        if (!p) {
+            p = { id: nid(S, "products"), title, fulfillment: "stock", default_supplier_id: null, active: true };
+            S.products.push(p);
+            products++;
+        }
+        if (sp.image)
+            p.image = sp.image;
+        for (const sv of sp.variants ?? []) {
+            const vt = sv.title ?? "Default";
+            let v = (sv.sku && S.variants.find((x) => x.sku === sv.sku)) || S.variants.find((x) => x.product_id === p.id && x.title === vt);
+            if (!v) {
+                v = { id: nid(S, "variants"), product_id: p.id, sku: sv.sku ?? null, title: vt, fulfillment: null, default_cost: null, supplier_id: null, reorder_level: 0, active: true };
+                S.variants.push(v);
+                variants++;
+            }
+            if (sv.sku && !v.sku)
+                v.sku = sv.sku;
+            v.barcode = sv.barcode ?? v.barcode ?? null;
+            if (sv.image)
+                v.image = sv.image;
+        }
+    }
+    audit(S, "products.import", "products", null, { products, variants });
+    return { products, variants };
+}
 export function updateVariant(S, id, b) {
     const v = S.variants.find((x) => x.id === id);
     if (!v)
@@ -138,7 +171,7 @@ export function listProducts(S) {
     return S.variants.filter((v) => v.active).map((v) => {
         const p = S.products.find((x) => x.id === v.product_id), st = stockOf(S, v.id);
         return { variant_id: v.id, product_id: p.id, title: p.title, variant: v.title, sku: v.sku, fulfillment: fulfil(S, v), variant_fulfillment: v.fulfillment, product_fulfillment: p.fulfillment,
-            supplier_id: v.supplier_id ?? p.default_supplier_id, default_cost: v.default_cost, reorder_level: v.reorder_level, qty: st.qty, value: st.value };
+            supplier_id: v.supplier_id ?? p.default_supplier_id, barcode: v.barcode ?? null, image: v.image ?? p.image ?? null, default_cost: v.default_cost, reorder_level: v.reorder_level, qty: st.qty, value: st.value };
     }).sort((a, b) => (a.title + a.variant).localeCompare(b.title + b.variant, "ar"));
 }
 export function openingStock(S, b) {
