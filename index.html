@@ -144,6 +144,10 @@ async function orders() {
   const ordTable = (rows) => table([col("#", "order_no"), col("التاريخ", (r) => String(r.ordered_at).slice(0, 10)), col("الحالة", (r) => chip(r.status)), col("الدفع", (r) => PAY[r.payment_method] ?? ""),
     col("المنطقة", "province"), col("المبلغ", (r) => Number(r.goods_total) + Number(r.shipping_charged), "m"), col("الشحن", "carrier"), col("ملاحظة", (r) => reasons(r.review_reason))], rows, (r) => openOrder(r.id, detail));
   const body = h("div", {}, ordTable(list));
+  const ls = (k, v) => { try { if (v === undefined) return localStorage.getItem(k) ?? ""; v ? localStorage.setItem(k, v) : localStorage.removeItem(k); } catch { return ""; } };
+  const rurl = h("input", { placeholder: "رابط الوسيط https://…workers.dev", value: ls("relayUrl") }), rkey = h("input", { type: "password", placeholder: "مفتاح الوصول", value: ls("relayKey") });
+  const pull = h("button", {}, "جلب الطلبات من Shopify الآن");
+  pull.onclick = act(pull, async () => { ls("relayUrl", rurl.value.trim()); ls("relayKey", rkey.value.trim()); const r = await pullOrders(); toast(`أُضيف ${r.added} طلب جديد · تخطّي ${r.skipped} · يحتاج مراجعة ${r.review}`); route(); });
   const file = h("input", { type: "file", accept: ".csv,text/csv" });
   const imp = h("button", {}, "استيراد الطلبات من ملف Shopify");
   imp.onclick = act(imp, async () => {
@@ -152,7 +156,8 @@ async function orders() {
     toast(`أُضيف ${r.added} طلب جديد · تخطّي ${r.skipped} مكرر · يحتاج مراجعة ${r.review}`); route();
   });
   const howto = h("div", { class: "mut" }, "من Shopify: الطلبات ← تصدير ← «كل الطلبات» ← CSV لنماذج Excel ← ثم اختر الملف هنا. الطلبات المكررة تُتجاهل تلقائيًا.");
-  return [card("إضافة طلبات", howto, h("div", { class: "row" }, field("ملف الطلبات", file)), h("div", { class: "bar" }, imp)), card("الطلبات", chips, q, body), detail];
+  return [card("الربط التلقائي مع Shopify", h("div", { class: "mut" }, "يُجلب الطلب الجديد تلقائيًا عند فتح التطبيق وكل 5 دقائق."), h("div", { class: "row" }, field("رابط الوسيط", rurl), field("مفتاح الوصول", rkey)), h("div", { class: "bar" }, pull)),
+    card("إضافة طلبات يدويًا (ملف)", howto, h("div", { class: "row" }, field("ملف الطلبات", file)), h("div", { class: "bar" }, imp)), card("الطلبات", chips, q, body), detail];
 }
 async function openOrder(id, box) {
   const [d, , ] = await Promise.all([api("GET", `/api/orders/${id}`), lookups()]);
@@ -430,12 +435,23 @@ async function settings() {
   return out;
 }
 
+// ---------- automatic order pull (through the free relay) ----------
+async function pullOrders() {
+  let url = "", key = ""; try { url = localStorage.getItem("relayUrl") ?? ""; key = localStorage.getItem("relayKey") ?? ""; } catch {}
+  if (!url || !key) throw new Error("أدخل رابط الوسيط والمفتاح أولًا");
+  const r = await fetch(url.replace(/\/$/, "") + "/?days=14", { headers: { authorization: "Bearer " + key } });
+  const j = await r.json().catch(() => ({})); if (!r.ok) throw new Error(j.error ?? "فشل الاتصال بالوسيط (" + r.status + ")");
+  return api("POST", "/api/orders/import", { orders: j.orders });
+}
+const autoPull = async () => { try { if (!localStorage.getItem("relayUrl")) return; const r = await pullOrders(); if (r.added) { toast(`وصل ${r.added} طلب جديد من Shopify`); if (["orders", "home"].includes(location.hash.slice(1) || "home")) route(); } } catch (e) { /* offline: try again later */ } };
+setInterval(() => backend && autoPull(), 300000);
+
 // ---------- boot ----------
 (async () => {
   try {
     backend = await createBackend(idbStorage());
     if (navigator.storage?.persist) navigator.storage.persist().catch(() => {});
-    route();
+    route(); autoPull();
   } catch (e) { $("#main").replaceChildren(h("div", { class: "card bad" }, "تعذّر فتح التخزين: " + e.message)); }
 })();
 if ("serviceWorker" in navigator) navigator.serviceWorker.register("./sw.js").catch(() => {});
