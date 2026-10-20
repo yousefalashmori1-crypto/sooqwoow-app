@@ -216,6 +216,10 @@ export async function createBackend(storage) {
         if (is("POST", /^\/api\/cash-counts$/))
             return S_.cashCount(S, b);
         if (is("POST", /^\/api\/orders\/import$/)) {
+            if (Array.isArray(b.orders)) {
+                const x = S_.importOrders(S, b.orders);
+                return { parsed: b.orders.length, ...x };
+            }
             const r = parseShopifyOrdersCsv(String(b.csv ?? ""));
             if (r.problems.length)
                 throw new LedgerError(r.problems.join("، "));
